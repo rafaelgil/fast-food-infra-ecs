@@ -105,7 +105,7 @@ resource "aws_security_group" "web_inbound_sg" {
 
 resource "aws_alb" "alb_fast_food_app" {
   name            = "${var.environment}-alb-fast-food-app"
-  subnets         = var.public_subnet_ids
+  subnets         = var.subnets_ids
   security_groups = concat(tolist(var.security_groups_ids),
     tolist([aws_security_group.web_inbound_sg.id])
   )
