@@ -17,6 +17,10 @@ resource "aws_ecr_repository" "fast_food_app" {
   name = var.repository_name
 }
 
+resource "aws_ecr_repository" "fast_food_app_pagamento" {
+  name = var.repository_name_pagamento
+}
+
 /*====
 ECS cluster
 ======*/
@@ -37,13 +41,38 @@ data "template_file" "web_task" {
     database_url      = "jdbc:postgresql://${var.database_endpoint}:5432/${var.database_name}?encoding=utf8&pool=40"
     database_username = var.database_username
     database_password = var.database_password
+    url_sqs           = var.url_sqs
     log_group         = aws_cloudwatch_log_group.fast_food_app.name
   }
 }
 
 resource "aws_ecs_task_definition" "web" {
-  family                   = "${var.environment}_web"
+  family                   = "${var.environment}-web"
   container_definitions    = data.template_file.web_task.rendered
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_execution_role.arn
+}
+
+data "template_file" "pagamento_task" {
+  template = file("${path.module}/tasks/pagamento_task_definition.json")
+
+  vars = {
+    image             = "${aws_ecr_repository.fast_food_app_pagamento.repository_url}:latest"
+    mongo_url         = var.mongo_url
+    mongo_username    = var.mongo_username
+    mongo_password    = var.mongo_password
+    url_sqs           = var.url_sqs
+    log_group         = aws_cloudwatch_log_group.fast_food_app.name
+  }
+}
+
+resource "aws_ecs_task_definition" "pagamento" {
+  family                   = "${var.environment}-pagamento"
+  container_definitions    = data.template_file.pagamento_task.rendered
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "256"
@@ -61,6 +90,18 @@ resource "random_id" "target_group_sufix" {
 
 resource "aws_alb_target_group" "alb_target_group" {
   name     = "${var.environment}-alb-target-group-${random_id.target_group_sufix.hex}"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+  target_type = "ip"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_alb_target_group" "pagamento_alb_target_group" {
+  name     = "${var.environment}-pg-alb-tg-group-${random_id.target_group_sufix.hex}"
   port     = 80
   protocol = "HTTP"
   vpc_id   = var.vpc_id
@@ -103,6 +144,38 @@ resource "aws_security_group" "web_inbound_sg" {
   }
 }
 
+/* security group for ALB */
+resource "aws_security_group" "pagamento_web_inbound_sg" {
+  name        = "${var.environment}-pagamento-web-inbound-sg"
+  description = "Allow HTTP from Anywhere into ALB Pagamento"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 8
+    to_port     = 0
+    protocol    = "icmp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.environment}-pagamento-web-inbound-sg"
+  }
+}
+
 resource "aws_alb" "alb_fast_food_app" {
   name            = "${var.environment}-alb-fast-food-app"
   subnets         = var.public_subnet_ids
@@ -116,6 +189,19 @@ resource "aws_alb" "alb_fast_food_app" {
   }
 }
 
+resource "aws_alb" "alb_fast_food_app_pagamento" {
+  name            = "${var.environment}-pag-alb-fast-food-app"
+  subnets         = var.public_subnet_ids
+  security_groups = concat(tolist(var.security_groups_ids),
+    tolist([aws_security_group.pagamento_web_inbound_sg.id])
+  )
+
+  tags = {
+    Name        = "${var.environment}-pagamento-alb-fast_food_app"
+    Environment = var.environment
+  }
+}
+
 resource "aws_alb_listener" "fast_food_app" {
   load_balancer_arn = aws_alb.alb_fast_food_app.arn
   port              = "80"
@@ -124,6 +210,18 @@ resource "aws_alb_listener" "fast_food_app" {
 
   default_action {
     target_group_arn = aws_alb_target_group.alb_target_group.arn
+    type             = "forward"
+  }
+}
+
+resource "aws_alb_listener" "fast_food_app_pagamento" {
+  load_balancer_arn = aws_alb.alb_fast_food_app_pagamento.arn
+  port              = "80"
+  protocol          = "HTTP"
+  depends_on        = [aws_alb_target_group.pagamento_alb_target_group]
+
+  default_action {
+    target_group_arn = aws_alb_target_group.pagamento_alb_target_group.arn
     type             = "forward"
   }
 }
@@ -239,6 +337,34 @@ resource "aws_ecs_service" "web" {
   depends_on = [aws_alb_target_group.alb_target_group, aws_iam_role_policy.ecs_service_role_policy]
 }
 
+data "aws_ecs_task_definition" "pagamento" {
+  task_definition = aws_ecs_task_definition.pagamento.family
+  depends_on = [ aws_ecs_task_definition.pagamento ]
+}
+
+resource "aws_ecs_service" "pagamento" {
+  name            = "${var.environment}-pagamento"
+  task_definition = "${aws_ecs_task_definition.pagamento.family}:${max("${aws_ecs_task_definition.pagamento.revision}", "${data.aws_ecs_task_definition.pagamento.revision}")}"
+  desired_count   = 2
+  launch_type     = "FARGATE"
+  cluster =       aws_ecs_cluster.cluster.id
+
+  network_configuration {
+    security_groups = concat(tolist(var.security_groups_ids),
+      tolist([aws_security_group.pagamento_web_inbound_sg.id])
+    )
+    subnets         = var.subnets_ids
+  }
+
+  load_balancer {
+    target_group_arn = aws_alb_target_group.pagamento_alb_target_group.arn
+    container_name   = "pagamento"
+    container_port   = 8090
+  }
+
+  depends_on = [aws_alb_target_group.pagamento_alb_target_group, aws_iam_role_policy.ecs_service_role_policy]
+}
+
 
 /*====
 Auto Scaling for ECS
@@ -263,6 +389,16 @@ resource "aws_appautoscaling_target" "target" {
   max_capacity       = 4
 }
 
+resource "aws_appautoscaling_target" "pagamento_target" {
+  service_namespace  = "ecs"
+  resource_id        = "service/${aws_ecs_cluster.cluster.name}/${aws_ecs_service.pagamento.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  role_arn           = aws_iam_role.ecs_autoscale_role.arn
+  min_capacity       = 2
+  max_capacity       = 4
+}
+
+
 resource "aws_appautoscaling_policy" "up" {
   name                    = "${var.environment}_scale_up"
   service_namespace       = "ecs"
@@ -282,6 +418,27 @@ resource "aws_appautoscaling_policy" "up" {
   }
 
   depends_on = [aws_appautoscaling_target.target]
+}
+
+resource "aws_appautoscaling_policy" "pagamento_up" {
+  name                    = "${var.environment}_scale_up"
+  service_namespace       = "ecs"
+  resource_id             = "service/${aws_ecs_cluster.cluster.name}/${aws_ecs_service.pagamento.name}"
+  scalable_dimension      = "ecs:service:DesiredCount"
+
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ChangeInCapacity"
+    cooldown                = 60
+    metric_aggregation_type = "Maximum"
+
+    step_adjustment {
+      metric_interval_lower_bound = 0
+      scaling_adjustment = 1
+    }
+  }
+
+  depends_on = [aws_appautoscaling_target.pagamento_target]
 }
 
 resource "aws_appautoscaling_policy" "down" {
@@ -304,6 +461,26 @@ resource "aws_appautoscaling_policy" "down" {
   depends_on = [aws_appautoscaling_target.target]
 }
 
+resource "aws_appautoscaling_policy" "pagamento_down" {
+  name                    = "${var.environment}_scale_down"
+  service_namespace       = "ecs"
+  resource_id             = "service/${aws_ecs_cluster.cluster.name}/${aws_ecs_service.pagamento.name}"
+  scalable_dimension      = "ecs:service:DesiredCount"
+
+  step_scaling_policy_configuration {
+    adjustment_type         = "ChangeInCapacity"
+    cooldown                = 60
+    metric_aggregation_type = "Maximum"
+
+    step_adjustment {
+      metric_interval_lower_bound = 0
+      scaling_adjustment = -1
+    }
+  }
+
+  depends_on = [aws_appautoscaling_target.pagamento_target]
+}
+
 /* metric used for auto scale */
 resource "aws_cloudwatch_metric_alarm" "service_cpu_high" {
   alarm_name          = "${var.environment}_fast_food_app_web_cpu_utilization_high"
@@ -322,4 +499,23 @@ resource "aws_cloudwatch_metric_alarm" "service_cpu_high" {
 
   alarm_actions = [aws_appautoscaling_policy.up.arn]
   ok_actions    = [aws_appautoscaling_policy.down.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "pagamento_service_cpu_high" {
+  alarm_name          = "${var.environment}_fast_food_app_pagamento_cpu_utilization_high"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
+  period              = "60"
+  statistic           = "Maximum"
+  threshold           = "85"
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.cluster.name
+    ServiceName = aws_ecs_service.pagamento.name
+  }
+
+  alarm_actions = [aws_appautoscaling_policy.pagamento_up.arn]
+  ok_actions    = [aws_appautoscaling_policy.pagamento_down.arn]
 }
