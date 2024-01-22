@@ -19,12 +19,17 @@ variable "subnets_ids" {
 }
 
 variable "public_subnet_ids" {
-  description = "The private subnets to use"
+  description = "The public subnets to use"
 }
 
 variable "repository_name" {
   description = "repository name"
   default = "fast-food-app"
+}
+
+variable "repository_name_pagamento" {
+  description = "repository name"
+  default = "fast-food-app-pagamento"
 }
 
 variable "database_endpoint" {
@@ -44,4 +49,24 @@ variable "database_password" {
 variable "database_name" {
   description = "The database that the app will use"
   default = "food"
+}
+
+variable "mongo_url" {
+  description = "The database url"
+  default = "mongodb://fast_food_pagamento_admin:fast_food_pagamento_root@fast-food-docdb-cluster.cluster-csxw4cuf3uvj.us-east-1.docdb.amazonaws.com:27017/?tls=true&tlsCAFile=global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+}
+
+variable "mongo_username" {
+  description = "The database username"
+  default = "fast_food_pagamento_admin"
+}
+
+variable "mongo_password" {
+  description = "The database password"
+  default = "fast_food_pagamento_root"
+}
+
+variable "url_sqs" {
+  description = "SQS URL"
+  default = "https://sqs.us-east-1.amazonaws.com/372431383879"
 }
