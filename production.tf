@@ -21,8 +21,4 @@ module "ecs" {
   security_groups_ids = [
     "sg-0bd1f3f5df705bd04", "sg-0155be07859999d7e"
   ]
-  database_endpoint = "fast-food-database.csxw4cuf3uvj.us-east-1.rds.amazonaws.com"
-  database_name     = var.production_database_name
-  database_username = var.production_database_username
-  database_password = var.production_database_password
 }

@@ -34,6 +34,7 @@ variable "repository_name_pagamento" {
 
 variable "database_endpoint" {
   description = "The database endpoint"
+  default = "fast-food-database.csxw4cuf3uvj.us-east-1.rds.amazonaws.com"
 }
 
 variable "database_username" {
