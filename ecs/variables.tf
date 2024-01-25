@@ -54,7 +54,7 @@ variable "database_name" {
 
 variable "mongo_url" {
   description = "The database url"
-  default = "mongodb://fast_food_pagamento_admin:fast_food_pagamento_root@fast-food-docdb-cluster.cluster-csxw4cuf3uvj.us-east-1.docdb.amazonaws.com:27017/?tls=true&tlsCAFile=global-bundle.pem&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
+  default = "mongodb://fast_food_pagamento_admin:fast_food_pagamento_root@fast-food-docdb-cluster.cluster-csxw4cuf3uvj.us-east-1.docdb.amazonaws.com:27017/?ssl=false&replicaSet=rs0&readPreference=secondaryPreferred&retryWrites=false"
 }
 
 variable "mongo_username" {
