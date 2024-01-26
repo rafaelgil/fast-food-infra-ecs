@@ -13,12 +13,12 @@ provider "aws" {
 module "ecs" {
   source             = "./ecs"
   environment        = local.environment
-  vpc_id             = "vpc-07a59b130204263c2"
+  vpc_id             = "vpc-0fe5292222d495854"
   availability_zones = local.production_availability_zones
   repository_name    = "fast-food-app"
-  subnets_ids        = ["subnet-07feb062c5ccf071c", "subnet-0420b3c2c14b17c36"]
-  public_subnet_ids  = ["subnet-08632d4df64e4707f", "subnet-0b3fe5e6cc1a9a399"]
+  subnets_ids        = ["subnet-07cfdc74862fb5a39", "subnet-0d7c3c1a48777ce60"]
+  public_subnet_ids  = ["subnet-0088189c9342626bc", "subnet-0a210ec2d8158cc25"]
   security_groups_ids = [
-    "sg-029841ea9f1cbd5cc", "sg-096d47a11c782e97a"
+    "sg-058d9aea3f43b735f", "sg-0514cbb401560b035"
   ]
 }
